@@ -26,6 +26,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Signed with the debug key on purpose: there is no upload key yet, and this
+            // way a release build installs straight over a debug one for testing.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

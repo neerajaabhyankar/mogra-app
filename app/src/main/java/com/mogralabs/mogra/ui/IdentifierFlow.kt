@@ -5,10 +5,12 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -37,10 +40,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -48,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mogralabs.mogra.R
 import com.mogralabs.mogra.identifier.IdentifierViewModel
 import com.mogralabs.mogra.identifier.IdentifierViewModel.SaTab
 import com.mogralabs.mogra.identifier.IdentifierViewModel.Step
@@ -62,7 +74,7 @@ private const val BLACK_W = 30
 
 /**
  * The Raag Identifier, all four steps. One view model holds the flow, so backing out of
- * Record and changing Sa does not throw away a recording.
+ * Record to change Sa does not throw away a recording.
  */
 @Composable
 fun IdentifierFlow(onLeave: () -> Unit) {
@@ -70,15 +82,15 @@ fun IdentifierFlow(onLeave: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var pendingRecord = remember { arrayOf(false) }
+    val pending = remember { arrayOf<(() -> Unit)?>(null) }
     val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted && pendingRecord[0]) vm.toggleRecording()
-        pendingRecord[0] = false
+        if (granted) pending[0]?.invoke()
+        pending[0] = null
     }
     fun withMic(action: () -> Unit) {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
-        if (granted) action() else { pendingRecord[0] = true; askMic.launch(Manifest.permission.RECORD_AUDIO) }
+        if (granted) action() else { pending[0] = action; askMic.launch(Manifest.permission.RECORD_AUDIO) }
     }
 
     when (state.step) {
@@ -98,9 +110,11 @@ private fun FlowHeader(title: String, step: String?, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Box(Modifier.size(44.dp).clickable(onClick = onBack), contentAlignment = Alignment.CenterStart) {
-            BackIcon(Mogra.Cream.copy(alpha = 0.70f))
-        }
+        Box(
+            Modifier.size(44.dp).clickable(onClick = onBack)
+                .semantics { contentDescription = "Back"; role = Role.Button },
+            contentAlignment = Alignment.CenterStart,
+        ) { BackIcon(Mogra.Cream.copy(alpha = 0.70f)) }
         MicroLabel(title, color = Mogra.TextMuted)
         Box(Modifier.size(44.dp), contentAlignment = Alignment.CenterEnd) {
             if (step != null) {
@@ -111,13 +125,15 @@ private fun FlowHeader(title: String, step: String?, onBack: () -> Unit) {
     }
 }
 
+/** The one red bar. It only ever means "go on to the next thing", never "record". */
 @Composable
 private fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth().height(54.dp).clip(Card)
             .background(if (enabled) Mogra.Crimson else Mogra.Cream.copy(alpha = 0.10f))
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { role = Role.Button },
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -132,6 +148,46 @@ private fun ErrorLine(message: String?) {
         modifier = Modifier.fillMaxWidth().padding(top = 10.dp), textAlign = TextAlign.Center)
 }
 
+/**
+ * The record control, shared by "hum your Sa" and "record the raag" so the two screens teach
+ * the same gesture.
+ *
+ * Idle it is an outlined circle with a word in it. Live it is solid crimson with a white
+ * square — the universal stop symbol. No ring: the timer underneath keeps time, and a ring
+ * that fills implies a length the recording is supposed to reach.
+ */
+@Composable
+private fun RecordCircle(
+    active: Boolean,
+    level: Float,
+    idleLabel: String,
+    diameter: Int = 176,
+    spokenIdle: String = idleLabel,
+    onClick: () -> Unit,
+) {
+    val swell by animateFloatAsState(if (active) level.coerceIn(0f, 1f) else 0f, label = "level")
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val size = (diameter + 14 * swell).toInt()
+        Box(
+            Modifier.size(size.dp).clip(CircleShape)
+                .background(if (active) Mogra.Crimson else Mogra.Crimson.copy(alpha = 0.10f))
+                .border(1.dp, Mogra.Crimson.copy(alpha = if (active) 0f else 0.36f), CircleShape)
+                .clickable(onClick = onClick)
+                .semantics {
+                    contentDescription = if (active) "Stop recording" else spokenIdle
+                    role = Role.Button
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (active) {
+                Box(Modifier.size(46.dp).clip(RoundedCornerShape(5.dp)).background(Color.White))
+            } else {
+                Text(idleLabel, style = MaterialTheme.typography.titleMedium, color = Mogra.CrimsonSoft)
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------ 1. set Sa
 
 @Composable
@@ -144,30 +200,30 @@ private fun SetSaScreen(
     FlowHeader("Raag Identifier", "1 / 2", onBack)
 
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(18.dp))
         Text("Where is your Sa?", style = MaterialTheme.typography.displayMedium, color = Mogra.TextPrimary)
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text("Needed for better accuracy!", style = MaterialTheme.typography.bodyLarge,
             color = Mogra.Cream.copy(alpha = 0.48f))
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
         Tabs(state.saTab, vm::selectTab)
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
         when (state.saTab) {
             SaTab.KEYBOARD -> Keyboard(state.keyboardMidi, vm::selectMidi)
             SaTab.HUM -> HumPanel(state, onHum)
             SaTab.HZ -> HzPanel(state, vm::setSaHz)
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
         SaCard(state.saHz, vm::playSa)
         ErrorLine(state.error)
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(20.dp))
     }
 
     PrimaryButton("Next: record", onClick = vm::confirmSa)
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(10.dp))
     Text("Your Sa is remembered for next time.", style = MaterialTheme.typography.bodyMedium,
         color = Mogra.TextMuted, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
 }
@@ -188,7 +244,8 @@ private fun Tabs(selected: SaTab, onSelect: (SaTab) -> Unit) {
                         .background(if (on) Mogra.Crimson.copy(alpha = 0.20f) else Color.Transparent)
                         .border(1.dp, if (on) Mogra.Crimson.copy(alpha = 0.36f) else Color.Transparent,
                             RoundedCornerShape(3.dp))
-                        .clickable { onSelect(tab) },
+                        .clickable { onSelect(tab) }
+                        .semantics { role = Role.Tab; this.selected = on },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(label, style = MaterialTheme.typography.bodyLarge.copy(
@@ -200,10 +257,8 @@ private fun Tabs(selected: SaTab, onSelect: (SaTab) -> Unit) {
 }
 
 /**
- * One octave on screen, dragged sideways through A2 to E4.
- *
- * The strip is wider than the viewport and scrolls; it opens on C3 so the common male Sa is
- * under the thumb without dragging, and A2 to E4 covers everyone else in both directions.
+ * One octave on screen, dragged sideways through A2 to E4. It opens on C3 so a common male
+ * Sa is under the thumb without dragging.
  */
 @Composable
 private fun Keyboard(selected: Int, onSelect: (Int) -> Unit) {
@@ -223,13 +278,17 @@ private fun Keyboard(selected: Int, onSelect: (Int) -> Unit) {
                 whites.forEach { midi ->
                     val on = midi == selected
                     Box(
-                        Modifier.width((KEY_W - 1).dp).height(124.dp)
-                            .padding(end = 1.dp)
+                        Modifier.width((KEY_W - 1).dp).height(124.dp).padding(end = 1.dp)
                             .clip(RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
                             .background(if (on) Mogra.Crimson else Color(0xFF211A1C))
                             .border(1.dp, if (on) Mogra.Crimson else Mogra.Hairline,
                                 RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
-                            .clickable { onSelect(midi) },
+                            .clickable { onSelect(midi) }
+                            .semantics {
+                                contentDescription = Sa.fullNameOf(midi)
+                                role = Role.RadioButton
+                                this.selected = on
+                            },
                         contentAlignment = Alignment.BottomCenter,
                     ) {
                         Text(
@@ -246,14 +305,18 @@ private fun Keyboard(selected: Int, onSelect: (Int) -> Unit) {
                 val below = whites.indexOfLast { it < midi }
                 val on = midi == selected
                 Box(
-                    Modifier
-                        .offset(x = ((below + 1) * KEY_W - BLACK_W / 2).dp)
+                    Modifier.offset(x = ((below + 1) * KEY_W - BLACK_W / 2).dp)
                         .width(BLACK_W.dp).height(78.dp)
                         .clip(RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
                         .background(if (on) Mogra.Crimson else Color(0xFF0C090B))
                         .border(1.dp, if (on) Mogra.Crimson else Mogra.Cream.copy(alpha = 0.14f),
                             RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
-                        .clickable { onSelect(midi) },
+                        .clickable { onSelect(midi) }
+                        .semantics {
+                            contentDescription = Sa.fullNameOf(midi)
+                            role = Role.RadioButton
+                            this.selected = on
+                        },
                     contentAlignment = Alignment.BottomCenter,
                 ) {
                     if (on) {
@@ -264,7 +327,6 @@ private fun Keyboard(selected: Int, onSelect: (Int) -> Unit) {
                 }
             }
         }
-        // edge fades, so it reads as a strip that continues rather than a keyboard that ends
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.width(26.dp).height(124.dp).align(Alignment.CenterStart).background(
                 Brush.horizontalGradient(listOf(Mogra.Ink, Color.Transparent))))
@@ -272,7 +334,7 @@ private fun Keyboard(selected: Int, onSelect: (Int) -> Unit) {
                 Brush.horizontalGradient(listOf(Color.Transparent, Mogra.Ink))))
         }
     }
-    Spacer(Modifier.height(14.dp))
+    Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
         Text("A2", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
@@ -287,33 +349,24 @@ private fun Keyboard(selected: Int, onSelect: (Int) -> Unit) {
 @Composable
 private fun HumPanel(state: IdentifierViewModel.State, onHum: () -> Unit) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            if (state.listening) "Listening — hold one steady note."
-            else "Hold one steady note.",
-            style = MaterialTheme.typography.bodyLarge, color = Mogra.Cream.copy(alpha = 0.48f))
-        Spacer(Modifier.height(18.dp))
-        Box(
-            Modifier.size(148.dp).clip(RoundedCornerShape(74.dp))
-                .background(if (state.listening) Mogra.Crimson.copy(alpha = 0.18f) else Mogra.CrimsonTint)
-                .border(1.dp, Mogra.Crimson.copy(alpha = if (state.listening) 0.55f else 0.32f),
-                    RoundedCornerShape(74.dp))
-                .clickable(onClick = onHum),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    state.heardHz?.let { "%.1f".format(it) } ?: if (state.listening) "…" else "Hum",
-                    style = MaterialTheme.typography.displayMedium.copy(fontSize = 30.sp),
-                    color = Mogra.TextPrimary)
-                if (state.heardHz != null) {
-                    Text("Hz", style = MaterialTheme.typography.bodyMedium, color = Mogra.TextMuted)
-                }
-            }
-        }
+        RecordCircle(
+            active = state.listening,
+            level = state.level,
+            idleLabel = "Hum Sa",
+            diameter = 156,
+            spokenIdle = "Hum your Sa",
+            onClick = onHum,
+        )
         Spacer(Modifier.height(14.dp))
         Text(
-            state.heardHz?.let { Sa.describe(it) } ?: "Tap, then hold Sa for about five seconds.",
-            style = MaterialTheme.typography.bodyMedium, color = Mogra.TextSecondary)
+            when {
+                state.listening -> "Hold one steady note."
+                state.heardHz != null -> "%.1f Hz · %s".format(state.heardHz, Sa.describe(state.heardHz))
+                else -> "Tap, then hold Sa for about five seconds."
+            },
+            style = MaterialTheme.typography.bodyLarge, color = Mogra.TextSecondary,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -345,15 +398,15 @@ private fun SaCard(saHz: Double, onPlay: () -> Unit) {
     val (midi, _) = Sa.nearest(saHz)
     Row(
         Modifier.fillMaxWidth().clip(Card).background(Mogra.SurfaceTint)
-            .border(1.dp, Mogra.Hairline, Card).padding(18.dp),
+            .border(1.dp, Mogra.Hairline, Card).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column {
             MicroLabel("Sa", color = Mogra.TextFaint)
-            Spacer(Modifier.height(5.dp))
-            Text(Sa.fullNameOf(midi), fontFamily = Tiro, fontSize = 30.sp, color = Mogra.TextPrimary)
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(Sa.fullNameOf(midi), fontFamily = Tiro, fontSize = 28.sp, color = Mogra.TextPrimary)
+            Spacer(Modifier.height(4.dp))
             Text(
                 listOfNotNull(Sa.pegName(midi), "%.2f Hz".format(saHz)).joinToString(" · "),
                 style = MaterialTheme.typography.bodyLarge, color = Mogra.Cream.copy(alpha = 0.45f))
@@ -361,7 +414,9 @@ private fun SaCard(saHz: Double, onPlay: () -> Unit) {
         Box(
             Modifier.height(44.dp).clip(Card)
                 .border(1.dp, Mogra.Crimson.copy(alpha = 0.42f), Card)
-                .clickable(onClick = onPlay).padding(horizontal = 16.dp),
+                .clickable(onClick = onPlay)
+                .semantics { contentDescription = "Play Sa"; role = Role.Button }
+                .padding(horizontal = 16.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text("▶  Play Sa", style = MaterialTheme.typography.bodyLarge.copy(
@@ -381,7 +436,7 @@ private fun RecordScreen(
     FlowHeader("Raag Identifier", "2 / 2", onBack = vm::changeSa)
 
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(16.dp))
         Row(
             Modifier.fillMaxWidth().height(44.dp).clip(Card).background(Mogra.SurfaceTint)
                 .border(1.dp, Mogra.Hairline, Card).padding(horizontal = 14.dp),
@@ -399,65 +454,51 @@ private fun RecordScreen(
             }
             Text("Change", style = MaterialTheme.typography.bodyLarge.copy(
                 fontWeight = FontWeight.SemiBold), color = Mogra.CrimsonSoft,
-                modifier = Modifier.clickable(onClick = vm::changeSa))
+                modifier = Modifier.clickable(onClick = vm::changeSa)
+                    .semantics { contentDescription = "Change Sa"; role = Role.Button })
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(18.dp))
         Text("Sing, hum or play", style = MaterialTheme.typography.displayMedium, color = Mogra.TextPrimary)
-        Spacer(Modifier.height(9.dp))
+        Spacer(Modifier.height(6.dp))
         Text("One voice or instrument, close to the phone. A tanpura or tabla in the background is fine.",
             style = MaterialTheme.typography.bodyLarge, color = Mogra.Cream.copy(alpha = 0.48f))
 
-        Spacer(Modifier.height(28.dp))
-        LevelMeter(state.level, state.recording)
+        Spacer(Modifier.height(22.dp))
+        RecordCircle(
+            active = state.recording,
+            level = state.level,
+            idleLabel = if (state.hasTake) "Again" else "Record",
+            spokenIdle = if (state.hasTake) "Record again" else "Start recording",
+            onClick = onRecord,
+        )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
         Text(
             "%d:%02d".format((state.elapsed / 60).toInt(), (state.elapsed % 60).toInt()),
-            fontFamily = Tiro, fontSize = 44.sp, color = Mogra.TextPrimary,
+            fontFamily = Tiro, fontSize = 38.sp, color = Mogra.TextPrimary,
             modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
-        Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp))
-            .background(Mogra.Cream.copy(alpha = 0.09f))) {
-            Box(Modifier
-                .fillMaxWidth((state.elapsed / IdentifierViewModel.MIN_SECONDS).coerceIn(0.0, 1.0).toFloat())
-                .height(3.dp).background(Mogra.Crimson))
-        }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
-            if (state.canAnalyse) "Past the 20-second minimum. Longer is better — an alap or a full bandish gives it much more to go on."
-            else "At least 20 seconds.",
-            style = MaterialTheme.typography.bodyLarge, color = Mogra.Cream.copy(alpha = 0.52f))
+            if (state.canAnalyse) "Keep going, the more the better!"
+            else "Keep going for at least 20 seconds",
+            style = MaterialTheme.typography.bodyLarge,
+            color = Mogra.Cream.copy(alpha = 0.52f),
+            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        if (state.recording) {
+            Spacer(Modifier.height(6.dp))
+            Text("Stay on this screen — leaving the app stops the recording.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Mogra.Cream.copy(alpha = 0.52f),
+                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        }
         ErrorLine(state.error)
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(18.dp))
     }
 
-    PrimaryButton(
-        when {
-            state.recording -> "Stop"
-            state.canAnalyse -> "Identify the raag"
-            else -> "Record"
-        },
-        onClick = { if (state.recording || !state.canAnalyse) onRecord() else vm.analyse() },
-    )
-}
-
-@Composable
-private fun LevelMeter(level: Float, live: Boolean) {
-    Row(
-        Modifier.fillMaxWidth().height(118.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        val bars = 52
-        repeat(bars) { i ->
-            // a fixed profile scaled by the live level: the shape is decoration, the height
-            // is the only thing carrying information
-            val shape = 0.35f + 0.65f * kotlin.math.abs(kotlin.math.sin(i * 1.7f))
-            val h = if (live) (12f + 100f * level * shape).coerceIn(4f, 116f) else 4f
-            Box(Modifier.weight(1f).height(h.dp).clip(RoundedCornerShape(2.dp))
-                .background(Mogra.Crimson.copy(alpha = if (live) 0.92f else 0.18f)))
-        }
+    // no separate "redo": the circle already says "Again" once there is a take
+    if (state.hasTake && !state.recording) {
+        PrimaryButton("Identify the raag", enabled = state.canAnalyse, onClick = vm::analyse)
     }
 }
 
@@ -467,34 +508,24 @@ private fun LevelMeter(level: Float, live: Boolean) {
 private fun AnalysingScreen(state: IdentifierViewModel.State, onBack: () -> Unit) = MograScreen {
     FlowHeader("Raag Identifier", null, onBack)
     val spin = rememberInfiniteTransition(label = "analysing")
-    val phase by spin.animateFloat(
-        0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "phase")
+    val angle by spin.animateFloat(
+        0f, 360f, infiniteRepeatable(tween(18_000, easing = LinearEasing)), label = "angle")
 
     Column(
         Modifier.fillMaxWidth().weight(1f),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            repeat(5) { i ->
-                val t = ((phase * 5f) - i + 5f) % 5f
-                val h = 14f + 34f * (1f - kotlin.math.min(1f, kotlin.math.abs(t - 1f)))
-                Box(Modifier.width(4.dp).height(h.dp).clip(RoundedCornerShape(2.dp))
-                    .background(Mogra.Crimson.copy(alpha = 0.85f)))
-            }
-        }
+        Image(
+            painter = painterResource(R.drawable.logo_mogra),
+            contentDescription = null,
+            modifier = Modifier.size(96.dp).rotate(angle),
+        )
         Spacer(Modifier.height(26.dp))
-        Text("Listening to it properly", style = MaterialTheme.typography.displayMedium,
-            color = Mogra.TextPrimary, textAlign = TextAlign.Center)
+        Text("Analyzing", style = MaterialTheme.typography.displayMedium, color = Mogra.TextPrimary)
         Spacer(Modifier.height(10.dp))
-        Text(
-            if (state.windows > 0) "${state.windows} window${if (state.windows == 1) "" else "s"} of 20 seconds."
-            else "Setting up the filter bank.",
-            style = MaterialTheme.typography.bodyLarge, color = Mogra.TextSecondary)
-        Spacer(Modifier.height(6.dp))
         Text("Nothing is uploaded — this runs on your phone.",
-            style = MaterialTheme.typography.bodyMedium, color = Mogra.Cream.copy(alpha = 0.46f))
+            style = MaterialTheme.typography.bodyLarge, color = Mogra.TextSecondary)
     }
 }
 
@@ -505,52 +536,55 @@ private fun ResultScreen(state: IdentifierViewModel.State, vm: IdentifierViewMod
     FlowHeader("Result", null, onBack = vm::recordAgain)
 
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(16.dp))
         MicroLabel("Most likely", color = Mogra.TextFaint)
         Spacer(Modifier.height(10.dp))
 
-        state.predictions.forEachIndexed { i, p ->
-            val lead = i == 0
+        // all five listed alike: the model's own probabilities say how confident to be, and
+        // dressing the first one up says it louder than the numbers justify
+        state.predictions.forEach { p ->
+            val percent = (p.probability * 100).roundToInt()
             Column(
-                Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(Card)
-                    .background(if (lead) Mogra.CrimsonTint else Color.Transparent)
-                    .border(1.dp, if (lead) Mogra.CrimsonEdge else Mogra.Cream.copy(alpha = 0.085f), Card)
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(Card)
+                    .border(1.dp, Mogra.Cream.copy(alpha = 0.085f), Card)
+                    .padding(horizontal = 14.dp, vertical = 11.dp)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "${p.raag}, $percent percent"
+                    },
             ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(p.raag, fontFamily = Tiro, fontSize = if (lead) 30.sp else 20.sp,
-                        color = if (lead) Mogra.TextPrimary else Mogra.Cream.copy(alpha = 0.72f))
-                    Text("${(p.probability * 100).roundToInt()}%",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (lead) Mogra.CrimsonSoft else Mogra.TextMuted)
+                    Text(p.raag, fontFamily = Tiro, fontSize = 21.sp,
+                        color = Mogra.Cream.copy(alpha = 0.88f))
+                    Text("$percent%",
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
+                        color = Mogra.TextMuted)
                 }
-                Spacer(Modifier.height(9.dp))
+                Spacer(Modifier.height(7.dp))
                 Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp))
                     .background(Mogra.Cream.copy(alpha = 0.09f))) {
                     Box(Modifier.fillMaxWidth(p.probability.toFloat().coerceIn(0f, 1f))
-                        .height(3.dp).background(
-                            if (lead) Mogra.Crimson else Mogra.Crimson.copy(alpha = 0.45f)))
+                        .height(3.dp).background(Mogra.Crimson.copy(alpha = 0.75f)))
                 }
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(10.dp))
         Column(
             Modifier.fillMaxWidth().clip(Card).background(Mogra.SurfaceTint)
-                .border(1.dp, Mogra.Hairline, Card).padding(16.dp),
+                .border(1.dp, Mogra.Hairline, Card).padding(14.dp),
         ) {
             MicroLabel("How much to trust this", color = Mogra.TextFaint)
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(7.dp))
             Text(
                 "The algorithm knows only 50 raags and will still guess if yours is not one of " +
                     "them. On professional recordings, the top guess is right about half the time, " +
                     "and the true raag is somewhere in these five about four times in five. " +
                     "Expect worse with casual humming.",
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 18.sp),
                 color = Mogra.Cream.copy(alpha = 0.56f))
         }
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(16.dp))
     }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -565,7 +599,7 @@ private fun ResultScreen(state: IdentifierViewModel.State, vm: IdentifierViewMod
                 color = Mogra.Cream.copy(alpha = 0.78f))
         }
     }
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(10.dp))
     Text(
         "Sa %s · %.0f s · %d window%s · 50 raags · %.1f s".format(
             Sa.fullNameOf(Sa.nearest(state.saHz).first), state.analysedSeconds,

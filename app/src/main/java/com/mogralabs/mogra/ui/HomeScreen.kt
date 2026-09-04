@@ -25,6 +25,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,14 +49,14 @@ fun HomeScreen(onOpenTool: (String) -> Unit) = MograScreen {
             .weight(1f)
             .verticalScroll(rememberScrollState()),
     ) {
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(12.dp))
 
         Image(
             painter = painterResource(R.drawable.logo_mogra),
             contentDescription = null,
-            modifier = Modifier.size(68.dp),
+            modifier = Modifier.size(58.dp),
         )
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(16.dp))
         Text(
             text = stringResource(R.string.app_name),
             style = MaterialTheme.typography.displayLarge,
@@ -64,7 +69,7 @@ fun HomeScreen(onOpenTool: (String) -> Unit) = MograScreen {
             color = Mogra.Cream.copy(alpha = 0.50f),
         )
 
-        Spacer(Modifier.height(38.dp))
+        Spacer(Modifier.height(22.dp))
         Hairline()
         Spacer(Modifier.height(16.dp))
         MicroLabel(stringResource(R.string.section_tools), color = Mogra.Cream.copy(alpha = 0.32f))
@@ -94,7 +99,7 @@ fun HomeScreen(onOpenTool: (String) -> Unit) = MograScreen {
             )
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(16.dp))
     }
 
     Row(
@@ -135,7 +140,12 @@ private fun ToolCard(
             .background(fill)
             .border(1.dp, border, CardShape)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 20.dp),
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (enabled) "$title. $blurb" else "$title. $blurb. Coming soon."
+                role = Role.Button
+                if (!enabled) disabled()
+            }
+            .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -174,7 +184,8 @@ private fun LanguageChip(label: String, selected: Boolean) {
                 if (selected) Mogra.Crimson.copy(alpha = 0.34f) else Mogra.Cream.copy(alpha = 0.09f),
                 shape,
             )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .semantics { contentDescription = label; role = Role.RadioButton },
         contentAlignment = Alignment.Center,
     ) {
         Text(

@@ -122,20 +122,38 @@ object Resampler {
     }
 
     /**
-     * Split a recording into [seconds]-long windows **centred** on it.
+     * Windows overlap by [OVERLAP_SECONDS], so a phrase that straddles a boundary is still
+     * seen whole by one of them. Consecutive windows therefore start 15 s apart, not 20.
+     */
+    const val OVERLAP_SECONDS = 5.0
+
+    private fun windowPlan(samples: Int, sr: Int, seconds: Double): Triple<Int, Int, Int> {
+        val n = Math.round(sr * seconds).toInt()
+        val hop = Math.round(sr * (seconds - OVERLAP_SECONDS)).toInt().coerceAtLeast(1)
+        val k = max(1, Math.round((samples - n).toDouble() / hop).toInt() + 1)
+        val span = n + (k - 1) * hop
+        return Triple(k, hop, max(0, (samples - span) / 2))
+    }
+
+    /** How many windows [windows] would return, without building them. */
+    fun windowCount(samples: Int, sr: Int, seconds: Double = 20.0): Int =
+        windowPlan(samples, sr, seconds).first
+
+    /**
+     * Split a recording into overlapping [seconds]-long windows, **centred** on it.
      *
      * Every training example was one 20 s clip centre-cropped from a longer one, so a 24 s
      * recording is scored on its middle 20 s, not its first 20 s. The window count is the
-     * length rounded to the nearest whole window.
+     * length rounded to the nearest whole hop; a final window that runs off the end is
+     * centre-padded, as the training loader did.
      */
     fun windows(y: FloatArray, sr: Int, seconds: Double = 20.0): List<FloatArray> {
         val n = Math.round(sr * seconds).toInt()
-        val k = max(1, (y.size.toDouble() / n + 0.5).toInt())
-        val start = max(0, (y.size - k * n) / 2)
+        val (k, hop, start) = windowPlan(y.size, sr, seconds)
         return (0 until k).map { i ->
-            val from = start + i * n
+            val from = (start + i * hop).coerceAtMost(y.size)
             val to = minOf(y.size, from + n)
-            fitLength(if (from >= y.size) FloatArray(0) else y.copyOfRange(from, to), n)
+            fitLength(if (from >= to) FloatArray(0) else y.copyOfRange(from, to), n)
         }
     }
 }

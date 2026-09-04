@@ -6,9 +6,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mogralabs.mogra.audio.Cqt
 import com.mogralabs.mogra.audio.RaagIdentifier
+import com.mogralabs.mogra.audio.Resampler
 import com.mogralabs.mogra.audio.Yin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +34,7 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
 
     data class State(
         val step: Step = Step.SET_SA,
+        val hasTake: Boolean = false,
         val saHz: Double = 138.59,
         val saTab: SaTab = SaTab.KEYBOARD,
         val keyboardMidi: Int = Sa.DEFAULT_MIDI,
@@ -60,7 +63,9 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
     private var captured: Audio.Recording? = null
     private var recordJob: Job? = null
     @Volatile private var stopRequested = false
+    @Volatile private var humStopRequested = false
     private var listenJob: Job? = null
+    private var analyseJob: Job? = null
 
     // ---------------------------------------------------------------- Sa
 
@@ -81,21 +86,31 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Listen for a held hum and take its median pitch as Sa. */
     fun listenForSa() {
-        if (listenJob?.isActive == true) { listenJob?.cancel(); return }
+        // tapping again stops early and still uses what was sung, the same way the raag
+        // recording does -- cancelling the coroutine would throw the samples away and
+        // surface as "StandaloneCoroutine was cancelled"
+        if (_state.value.listening) { humStopRequested = true; return }
+        humStopRequested = false
         _state.update { it.copy(listening = true, heardHz = null, error = null) }
         listenJob = viewModelScope.launch {
             runCatching {
-                val rec = Audio.record(maxSeconds = 5.0, onLevel = { lv ->
-                    _state.update { it.copy(level = lv) }
-                })
+                val rec = Audio.record(
+                    maxSeconds = 8.0,
+                    shouldStop = { humStopRequested },
+                    onLevel = { lv -> _state.update { it.copy(level = lv) } },
+                )
                 withContext(Dispatchers.Default) { Yin.fromHum(rec.samples, rec.sampleRate) }
             }.onSuccess { hz ->
                 _state.update {
-                    it.copy(listening = false, heardHz = hz, saHz = hz,
+                    it.copy(listening = false, level = 0f, heardHz = hz, saHz = hz,
                         keyboardMidi = Sa.nearest(hz).first)
                 }
             }.onFailure { e ->
-                _state.update { it.copy(listening = false, error = e.message ?: "could not hear a pitch") }
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _state.update {
+                    it.copy(listening = false, level = 0f,
+                        error = e.message ?: "could not hear a steady pitch")
+                }
             }
         }
     }
@@ -125,7 +140,7 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }.onSuccess { rec ->
                 captured = rec
-                _state.update { it.copy(recording = false, level = 0f) }
+                _state.update { it.copy(recording = false, level = 0f, hasTake = rec.seconds > 1.0) }
             }.onFailure { e ->
                 // cancellation is how stopping is spelled, so it is not an error
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -136,8 +151,11 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
 
     fun analyse() {
         val rec = captured ?: return
-        _state.update { it.copy(step = Step.ANALYSING, error = null, windows = 0) }
-        viewModelScope.launch {
+        // the count follows from the length alone, and settling it before the screen appears
+        // keeps the Analysing text from changing under the reader
+        val expected = Resampler.windowCount(rec.samples.size, rec.sampleRate)
+        _state.update { it.copy(step = Step.ANALYSING, error = null, windows = expected) }
+        analyseJob = viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
                     val m = model ?: RaagIdentifier.load(getApplication()).also { model = it }
@@ -150,7 +168,9 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
                     val ms = measureTimeMillis {
                         out = m.predict(rec.samples, rec.sampleRate, sa, kernel = kernel!!,
                             onProgress = { done, total ->
-                                _state.update { it.copy(windows = total) }
+                                // the identify loop is plain blocking code, so cancellation
+                                // only lands where it is checked -- once per window
+                                coroutineContext.ensureActive()
                                 Log.i(TAG, "window $done/$total")
                             })
                     }
@@ -163,6 +183,7 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
                         analysedSeconds = rec.seconds)
                 }
             }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "identify failed", e)
                 _state.update {
                     it.copy(step = Step.RECORD, error = e.message ?: e::class.java.simpleName)
@@ -171,10 +192,13 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun cancelAnalysis() = _state.update { it.copy(step = Step.RECORD) }
+    fun cancelAnalysis() {
+        analyseJob?.cancel()
+        _state.update { it.copy(step = Step.RECORD) }
+    }
 
     fun recordAgain() = _state.update {
-        it.copy(step = Step.RECORD, predictions = emptyList(), elapsed = 0.0)
+        it.copy(step = Step.RECORD, predictions = emptyList(), elapsed = 0.0, hasTake = false)
     }
 
     fun changeSa() = _state.update { it.copy(step = Step.SET_SA, predictions = emptyList()) }
