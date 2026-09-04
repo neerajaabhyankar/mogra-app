@@ -10,3 +10,5 @@ captures/
 *.apk
 *.aab
 .kotlin/
+__pycache__/
+*.pyc

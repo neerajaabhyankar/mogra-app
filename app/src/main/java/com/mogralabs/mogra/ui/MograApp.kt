@@ -20,7 +20,7 @@ fun MograApp() {
             HomeScreen(onOpenTool = { route -> nav.navigate(route) })
         }
         composable(Routes.IDENTIFIER) {
-            NotBuiltYetScreen(title = "Raag Identifier", onBack = { nav.popBackStack() })
+            IdentifierFlow(onLeave = { nav.popBackStack() })
         }
         composable(Routes.BY_NOTES) {
             NotBuiltYetScreen(title = "Raagfinder by Notes", onBack = { nav.popBackStack() })

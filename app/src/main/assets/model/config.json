@@ -1,0 +1,11 @@
+{
+ "melody_weight": 0.4,
+ "temperature_cqt": 0.925,
+ "temperature_melody": 2.36,
+ "db_lam": 0.3,
+ "epochs": 34,
+ "seed": 0,
+ "dataset": "neerajaabhyankar/hindustani-raag-small@326caef0bc01da44ad46e4d9c65a5146da6bcc5b",
+ "n_fit_clips": 1810,
+ "calibrated_on": "reused from the companion validation run"
+}
