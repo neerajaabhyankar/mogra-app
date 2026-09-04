@@ -1,0 +1,71 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Home"
+    },
+    {
+      "file": "SetSa.dc.html",
+      "x": 510,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Set Sa - pick a note"
+    },
+    {
+      "file": "SetSaHum.dc.html",
+      "x": 1020,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Set Sa - hum it"
+    },
+    {
+      "file": "Record.dc.html",
+      "x": 1530,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Record"
+    },
+    {
+      "file": "Analysing.dc.html",
+      "x": 2040,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Analysing"
+    },
+    {
+      "file": "Results.dc.html",
+      "x": 2550,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Result"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "flow-note",
+      "x": 0,
+      "y": -170,
+      "w": 760,
+      "text": "mogra 0.1 - Raag Identifier, English only.\nLeft to right: the whole flow. Home -> Set Sa -> Record -> Analysing -> Result.\nSet Sa is Option A: explicit tabs (hum / pick a note / Hz). Option B (tuner-first) is parked, not deleted."
+    },
+    {
+      "id": "keyboard-note",
+      "x": 510,
+      "y": 900,
+      "w": 400,
+      "text": "Keyboard now drags.\n\nOne octave on screen. It opens on C3-B3 - the same octave as before - and drags down to A2 and up to E4, so male Sa (C3-E3) and higher Sa both sit inside the range. The octave -/+ stepper is gone; the rail under the keys shows where you are."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}
