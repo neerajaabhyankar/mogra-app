@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings that are the same in every build. The language chips show each language's own
+     name, which is the convention everywhere and the only way someone who cannot read the
+     current language can find their way out of it. -->
+<resources>
+    <string name="lang_en" translatable="false">English</string>
+    <string name="lang_mr" translatable="false">मराठी</string>
+    <string name="lang_hi" translatable="false">हिंदी</string>
+</resources>

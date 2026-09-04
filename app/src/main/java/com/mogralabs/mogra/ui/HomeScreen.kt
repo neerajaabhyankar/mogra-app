@@ -1,5 +1,6 @@
 package com.mogralabs.mogra.ui
 
+import android.app.Activity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.integerResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -33,6 +36,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mogralabs.mogra.Language
 import com.mogralabs.mogra.R
 import com.mogralabs.mogra.ui.theme.Mogra
 import com.mogralabs.mogra.ui.theme.Mukta
@@ -59,8 +63,14 @@ fun HomeScreen(onOpenTool: (String) -> Unit) = MograScreen {
         Spacer(Modifier.height(16.dp))
         Text(
             text = stringResource(R.string.app_name),
-            style = MaterialTheme.typography.displayLarge,
+            style = MaterialTheme.typography.displayLarge.copy(
+                fontSize = integerResource(R.integer.wordmark_size_sp).sp,
+                letterSpacing = (integerResource(R.integer.wordmark_tracking_hundredths) / 100f).sp,
+            ),
             color = Mogra.TextPrimary,
+            // the wordmark is one word in every language and must never break across lines
+            maxLines = 1,
+            softWrap = false,
         )
         Spacer(Modifier.height(9.dp))
         Text(
@@ -107,10 +117,24 @@ fun HomeScreen(onOpenTool: (String) -> Unit) = MograScreen {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Changing the language recreates the Activity, which is what the framework does
+        // for a configuration change anyway. The chips always show each language's own
+        // name, so someone who cannot read the current one can still get out of it.
+        val context = LocalContext.current
+        val current = Language.current(context)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LanguageChip(stringResource(R.string.lang_en), selected = true)
-            LanguageChip(stringResource(R.string.lang_mr), selected = false)
-            LanguageChip(stringResource(R.string.lang_hi), selected = false)
+            listOf(
+                "en" to stringResource(R.string.lang_en),
+                "mr" to stringResource(R.string.lang_mr),
+                "hi" to stringResource(R.string.lang_hi),
+            ).forEach { (tag, label) ->
+                LanguageChip(label, selected = tag == current) {
+                    if (tag != current) {
+                        Language.choose(context, tag)
+                        (context as? Activity)?.recreate()
+                    }
+                }
+            }
         }
         Text(
             text = "0.1.0",
@@ -128,6 +152,7 @@ private fun ToolCard(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val comingSoon = stringResource(R.string.cd_coming_soon)
     val border = if (enabled) Mogra.CrimsonEdge else Mogra.Cream.copy(alpha = 0.085f)
     val fill = if (enabled) Mogra.CrimsonTint else Color.Transparent
     val titleColor = if (enabled) Mogra.TextPrimary else Mogra.Cream.copy(alpha = 0.50f)
@@ -141,7 +166,8 @@ private fun ToolCard(
             .border(1.dp, border, CardShape)
             .clickable(enabled = enabled, onClick = onClick)
             .semantics(mergeDescendants = true) {
-                contentDescription = if (enabled) "$title. $blurb" else "$title. $blurb. Coming soon."
+                contentDescription =
+                    if (enabled) "$title. $blurb" else "$title. $blurb. $comingSoon"
                 role = Role.Button
                 if (!enabled) disabled()
             }
@@ -173,11 +199,12 @@ private fun ToolCard(
 }
 
 @Composable
-private fun LanguageChip(label: String, selected: Boolean) {
+private fun LanguageChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(4.dp)
     Box(
         Modifier
             .clip(shape)
+            .clickable(onClick = onClick)
             .background(if (selected) Mogra.Crimson.copy(alpha = 0.08f) else Color.Transparent)
             .border(
                 1.dp,

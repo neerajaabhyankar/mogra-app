@@ -37,7 +37,8 @@ class RaagIdentifier private constructor(
     private val temperatureMelody: Double,
 ) {
 
-    data class Prediction(val raag: String, val probability: Double)
+    /** [index] is the position in `raags.json`, which is how the UI finds a translated name. */
+    data class Prediction(val index: Int, val raag: String, val probability: Double)
 
     /**
      * Fused probabilities for one recording, averaged over its 20 s windows.
@@ -69,7 +70,7 @@ class RaagIdentifier private constructor(
     ): List<Prediction> {
         val p = probabilities(y, sr, tonicHz, kernel, onProgress)
         return p.indices.sortedByDescending { p[it] }.take(topK)
-            .map { Prediction(raags[it], p[it]) }
+            .map { Prediction(it, raags[it], p[it]) }
     }
 
     private fun windowProbabilities(

@@ -14,8 +14,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        // Locales the app actually ships strings for. mr and hi land here next.
-        resourceConfigurations += listOf("en")
+        // Locales the app ships strings for.
+        resourceConfigurations += listOf("en", "mr", "hi")
         // PyTorch ships native libraries for four ABIs and they dominate the APK; every
         // Android phone this targets is arm64. Without this the debug APK is 235 MB.
         ndk { abiFilters += "arm64-v8a" }

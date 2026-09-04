@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="peg_name_leads">true</bool>
+    <integer name="wordmark_size_sp">40</integer>
+    <integer name="wordmark_tracking_hundredths">0</integer>
+</resources>

@@ -4,6 +4,8 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.annotation.StringRes
+import com.mogralabs.mogra.R
 import com.mogralabs.mogra.audio.Cqt
 import com.mogralabs.mogra.audio.RaagIdentifier
 import com.mogralabs.mogra.audio.Resampler
@@ -47,7 +49,7 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
         val analysedSeconds: Double = 0.0,
         val elapsedMillis: Long = 0,
         val predictions: List<RaagIdentifier.Prediction> = emptyList(),
-        val error: String? = null,
+        @StringRes val error: Int? = null,
     ) {
         val canAnalyse: Boolean get() = elapsed >= MIN_SECONDS
     }
@@ -108,8 +110,7 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
             }.onFailure { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _state.update {
-                    it.copy(listening = false, level = 0f,
-                        error = e.message ?: "could not hear a steady pitch")
+                    it.copy(listening = false, level = 0f, error = errorFor(e, R.string.err_no_pitch))
                 }
             }
         }
@@ -144,7 +145,7 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
             }.onFailure { e ->
                 // cancellation is how stopping is spelled, so it is not an error
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _state.update { it.copy(recording = false, error = e.message ?: "recording failed") }
+                _state.update { it.copy(recording = false, error = errorFor(e, R.string.err_record_failed)) }
             }
         }
     }
@@ -186,7 +187,7 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "identify failed", e)
                 _state.update {
-                    it.copy(step = Step.RECORD, error = e.message ?: e::class.java.simpleName)
+                    it.copy(step = Step.RECORD, error = R.string.err_identify_failed)
                 }
             }
         }
@@ -209,6 +210,12 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
         Step.ANALYSING -> { cancelAnalysis(); true }
         Step.RESULT -> { recordAgain(); true }
     }
+
+    /** A missing microphone is worth saying out loud; everything else gets the general line. */
+    @StringRes
+    private fun errorFor(e: Throwable, @StringRes fallback: Int): Int =
+        if (e.message?.contains("microphone", ignoreCase = true) == true) R.string.err_no_mic
+        else fallback
 
     companion object {
         const val MIN_SECONDS = 20.0

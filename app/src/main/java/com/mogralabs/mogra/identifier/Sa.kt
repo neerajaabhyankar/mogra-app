@@ -1,6 +1,8 @@
 package com.mogralabs.mogra.identifier
 
 import android.content.Context
+import com.mogralabs.mogra.Numerals
+import com.mogralabs.mogra.R
 import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.pow
@@ -42,26 +44,26 @@ object Sa {
         return midi to (exact - midi) * 100.0
     }
 
-    /** "C♯3 +4 cents", or just "C♯3" when it is within a cent. */
-    fun describe(hz: Double): String {
+    /**
+     * "C♯3", and how far off it is in whole cents — null when it is within one, which is
+     * closer than anyone can hear or hold.
+     */
+    fun describe(hz: Double): Pair<String, Int?> {
         val (midi, cents) = nearest(hz)
-        val name = fullNameOf(midi)
-        return if (abs(cents) < 1.0) name
-        else "$name ${if (cents > 0) "+" else "−"}${abs(cents).roundToInt()} cents"
+        return fullNameOf(midi) to (if (abs(cents) < 1.0) null else cents.roundToInt())
     }
 
     /**
      * Kali 1 to Kali 5, Safed 1 to Safed 7 — the harmonium-peg names most people actually
      * use for their Sa. Null outside the range they cover.
      */
-    fun pegName(midi: Int): String? {
+    fun pegName(context: Context, midi: Int): String? {
         val white = intArrayOf(0, 2, 4, 5, 7, 9, 11)
         val pc = ((midi % 12) + 12) % 12
         val whiteIndex = white.indexOf(pc)
-        if (whiteIndex >= 0) return "Safed ${whiteIndex + 1}"
-        val blackOrder = intArrayOf(1, 3, 6, 8, 10)
-        val blackIndex = blackOrder.indexOf(pc)
-        return if (blackIndex >= 0) "Kali ${blackIndex + 1}" else null
+        if (whiteIndex >= 0) return context.getString(R.string.peg_white, Numerals.of(context, whiteIndex + 1))
+        val blackIndex = intArrayOf(1, 3, 6, 8, 10).indexOf(pc)
+        return if (blackIndex >= 0) context.getString(R.string.peg_black, Numerals.of(context, blackIndex + 1)) else null
     }
 
     /** The last Sa the user set, or C♯3 the first time. Kept so the flow never asks twice. */
