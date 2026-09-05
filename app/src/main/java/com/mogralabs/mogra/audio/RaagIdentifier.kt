@@ -41,41 +41,52 @@ class RaagIdentifier private constructor(
     data class Prediction(val index: Int, val raag: String, val probability: Double)
 
     /**
+     * What one run produces: the ranking, and what the recording thinks of the tonic it was
+     * given. [saOffsetCents] is null when nothing in the recording sits near enough to Sa
+     * to have an opinion — see [SaCheck].
+     */
+    data class Analysis(val predictions: List<Prediction>, val saOffsetCents: Double?)
+
+    /**
      * Fused probabilities for one recording, averaged over its 20 s windows.
      *
      * [kernel] is optional only so a caller that already built it for this tonic can pass
      * it back in; building it is the one costly thing that does not depend on the audio.
      */
-    fun probabilities(
-        y: FloatArray, sr: Int, tonicHz: Double,
+    fun analyse(
+        y: FloatArray, sr: Int, tonicHz: Double, topK: Int = 5,
         kernel: Cqt.Kernel = Cqt.Kernel.forTonic(tonicHz),
         onProgress: ((Int, Int) -> Unit)? = null,
-    ): DoubleArray {
+    ): Analysis {
         require(tonicHz.isFinite() && tonicHz > 0) { "tonicHz is required" }
         val windows = Resampler.windows(y, sr)
         val summed = DoubleArray(raags.size)
+        val pitch = DoubleArray(Melody.N_BINS)
         windows.forEachIndexed { i, w ->
-            val p = windowProbabilities(w, sr, tonicHz, kernel)
+            val (p, hist) = windowProbabilities(w, sr, tonicHz, kernel)
             for (j in summed.indices) summed[j] += p[j]
+            for (b in pitch.indices) pitch[b] += hist[b]
             onProgress?.invoke(i + 1, windows.size)
         }
         for (j in summed.indices) summed[j] /= windows.size
-        return summed
+        val order = summed.indices.sortedByDescending { summed[it] }.take(topK)
+        return Analysis(
+            predictions = order.map { Prediction(it, raags[it], summed[it]) },
+            // the pitch histogram is already Sa-relative, so the check is free
+            saOffsetCents = SaCheck.offsetCents(pitch),
+        )
     }
 
     fun predict(
         y: FloatArray, sr: Int, tonicHz: Double, topK: Int = 5,
         kernel: Cqt.Kernel = Cqt.Kernel.forTonic(tonicHz),
         onProgress: ((Int, Int) -> Unit)? = null,
-    ): List<Prediction> {
-        val p = probabilities(y, sr, tonicHz, kernel, onProgress)
-        return p.indices.sortedByDescending { p[it] }.take(topK)
-            .map { Prediction(it, raags[it], p[it]) }
-    }
+    ): List<Prediction> = analyse(y, sr, tonicHz, topK, kernel, onProgress).predictions
 
+    /** (fused probabilities, the window's Sa-relative pitch histogram). */
     private fun windowProbabilities(
         w: FloatArray, sr: Int, tonicHz: Double, kernel: Cqt.Kernel,
-    ): DoubleArray {
+    ): Pair<DoubleArray, FloatArray> {
         // branch 1 -- 22.05 kHz, peak-normalised, exactly 20 s
         val y22 = Resampler.fitLength(
             Resampler.peakNormalise(Resampler.resample(w, sr, Cqt.SR)),
@@ -100,7 +111,9 @@ class RaagIdentifier private constructor(
         val hist = Melody.histogram(f0, voiced, tonicHz)
         val pMel = softmax(linear.scores(hist), temperatureMelody)
 
-        return DoubleArray(pCqt.size) { (1.0 - melodyWeight) * pCqt[it] + melodyWeight * pMel[it] }
+        return DoubleArray(pCqt.size) {
+            (1.0 - melodyWeight) * pCqt[it] + melodyWeight * pMel[it]
+        } to hist
     }
 
     private fun softmax(x: DoubleArray, temperature: Double): DoubleArray {

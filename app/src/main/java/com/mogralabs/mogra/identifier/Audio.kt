@@ -91,6 +91,33 @@ object Audio {
         android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N
 
     /**
+     * A phrase, one note after another, in a single buffer.
+     *
+     * Built as one buffer rather than a note at a time because a phrase is heard as a line:
+     * gaps between separate AudioTrack writes would put a stutter between swars that is not
+     * in the music.
+     */
+    suspend fun playPhrase(freqs: List<Double>, secondsPerNote: Double = 0.42) =
+        withContext(Dispatchers.IO) {
+            if (freqs.isEmpty()) return@withContext
+            val sr = 44100
+            val per = (sr * secondsPerNote).toInt()
+            val pcm = FloatArray(per * freqs.size)
+            freqs.forEachIndexed { note, hz ->
+                for (i in 0 until per) {
+                    val t = i.toDouble() / sr
+                    val v = 0.6 * sin(2 * PI * hz * t) +
+                            0.22 * sin(2 * PI * hz * 2 * t) +
+                            0.10 * sin(2 * PI * hz * 3 * t)
+                    // a short fade at each end so consecutive notes do not click
+                    val edge = min(1.0, min(t, secondsPerNote - t) / 0.02)
+                    pcm[note * per + i] = (v * max(0.0, edge) * 0.45).toFloat()
+                }
+            }
+            play(pcm, sr, secondsPerNote * freqs.size)
+        }
+
+    /**
      * A short drone at [hz] so the user can hear the Sa they just chose.
      *
      * Three partials at falling amplitude rather than a bare sine — a sine is hard to sing
@@ -110,6 +137,10 @@ object Audio {
             val body = exp(-t * 0.6)
             pcm[i] = (v * attack * max(0.0, release) * body * 0.5).toFloat()
         }
+        play(pcm, sr, seconds)
+    }
+
+    private suspend fun play(pcm: FloatArray, sr: Int, seconds: Double) {
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -122,11 +153,11 @@ object Audio {
                     .setSampleRate(sr)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build())
-            .setBufferSizeInBytes(n * 4)
+            .setBufferSizeInBytes(pcm.size * 4)
             .setTransferMode(AudioTrack.MODE_STATIC)
             .build()
         try {
-            track.write(pcm, 0, n, AudioTrack.WRITE_BLOCKING)
+            track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
             track.play()
             kotlinx.coroutines.delay((seconds * 1000).toLong())
         } finally {

@@ -23,10 +23,10 @@ fun MograApp() {
             IdentifierFlow(onLeave = { nav.popBackStack() })
         }
         composable(Routes.BY_NOTES) {
-            NotBuiltYetScreen(title = "Raagfinder by Notes", onBack = { nav.popBackStack() })
+            ByNotesScreen(onBack = { nav.popBackStack() })
         }
         composable(Routes.BY_NAME) {
-            NotBuiltYetScreen(title = "Raagfinder by Name", onBack = { nav.popBackStack() })
+            ByNameScreen(onBack = { nav.popBackStack() })
         }
     }
 }

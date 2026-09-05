@@ -55,17 +55,21 @@ class TranslationTest {
     }
 
     @Test fun `no locale left a string in English by accident`() {
-        // every translated string should contain Devanagari, with the handful of exceptions
-        // that are deliberately identical in all three
-        val sameEverywhere = setOf("percent_only", "step_of")
+        // Pure format strings are the same in all three languages by design -- the saptak
+        // marks included, now that every language draws the dot rather than typing a comma.
+        val sameEverywhere = setOf("percent_only", "step_of", "saptak_mandra", "saptak_taara")
+        val noLetters = sameEverywhere
         val en = strings("values")
         listOf("values-mr", "values-hi").forEach { dir ->
             strings(dir).forEach { (key, value) ->
-                if (key in sameEverywhere) return@forEach
-                assertTrue("$dir/$key is byte-identical to English: \"$value\"",
-                    value != en.getValue(key))
-                assertTrue("$dir/$key has no Devanagari: \"$value\"",
-                    value.any { it in 'ऀ'..'ॿ' })
+                if (key !in sameEverywhere) {
+                    assertTrue("$dir/$key is byte-identical to English: \"$value\"",
+                        value != en.getValue(key))
+                }
+                if (key !in noLetters) {
+                    assertTrue("$dir/$key has no Devanagari: \"$value\"",
+                        value.any { it in 'ऀ'..'ॿ' })
+                }
             }
         }
     }
@@ -129,6 +133,24 @@ class TranslationTest {
                     specs(value).none { it.endsWith("d") || it.endsWith("f") })
             }
         }
+    }
+
+    /**
+     * The two arrays that index into shipped data. If the raag database grows and the table
+     * does not, the app would show the wrong name against the right raag — worse than
+     * showing nothing.
+     */
+    @Test fun `the database name and swar arrays match the data they index`() {
+        val db = File("src/main/assets/raagdb.json").readText()
+        val raagCount = Regex(""""key":"""").findAll(db).count()
+        assertTrue("expected a populated raagdb.json", raagCount > 100)
+        listOf("values", "values-mr", "values-hi").forEach { dir ->
+            assertEquals("$dir db_raag_names", raagCount, array(dir, "db_raag_names").size)
+            assertEquals("$dir swar_names", 12, array(dir, "swar_names").size)
+        }
+        // English keeps the shorthand the database itself is written in
+        assertEquals(listOf("S", "r", "R", "g", "G", "m", "M", "P", "d", "D", "n", "N"),
+            array("values", "swar_names"))
     }
 
     @Test fun `translation md covers every shipped string`() {

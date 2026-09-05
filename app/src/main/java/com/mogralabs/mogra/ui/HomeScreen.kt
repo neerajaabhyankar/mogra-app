@@ -96,15 +96,15 @@ fun HomeScreen(onOpenTool: (String) -> Unit) = MograScreen {
             ToolCard(
                 title = stringResource(R.string.tool_by_notes_title),
                 blurb = stringResource(R.string.tool_by_notes_blurb),
-                icon = { ContourIcon(Mogra.Cream.copy(alpha = 0.30f)) },
-                enabled = false,
+                icon = { ContourIcon(Mogra.Crimson) },
+                enabled = true,
                 onClick = { onOpenTool(Routes.BY_NOTES) },
             )
             ToolCard(
                 title = stringResource(R.string.tool_by_name_title),
                 blurb = stringResource(R.string.tool_by_name_blurb),
-                icon = { SearchIcon(Mogra.Cream.copy(alpha = 0.30f)) },
-                enabled = false,
+                icon = { SearchIcon(Mogra.Crimson) },
+                enabled = true,
                 onClick = { onOpenTool(Routes.BY_NAME) },
             )
         }

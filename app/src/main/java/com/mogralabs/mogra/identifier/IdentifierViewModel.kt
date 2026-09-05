@@ -9,6 +9,7 @@ import com.mogralabs.mogra.R
 import com.mogralabs.mogra.audio.Cqt
 import com.mogralabs.mogra.audio.RaagIdentifier
 import com.mogralabs.mogra.audio.Resampler
+import com.mogralabs.mogra.audio.SaCheck
 import com.mogralabs.mogra.audio.Yin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,6 +50,8 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
         val analysedSeconds: Double = 0.0,
         val elapsedMillis: Long = 0,
         val predictions: List<RaagIdentifier.Prediction> = emptyList(),
+        /** How far the recording's own Sa sits from the given one, when it is worth saying. */
+        val saDriftCents: Double? = null,
         @StringRes val error: Int? = null,
     ) {
         val canAnalyse: Boolean get() = elapsed >= MIN_SECONDS
@@ -165,9 +168,9 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
                         kernel = Cqt.Kernel.forTonic(sa)
                         kernelFor = sa
                     }
-                    var out: List<RaagIdentifier.Prediction>
+                    var out: RaagIdentifier.Analysis
                     val ms = measureTimeMillis {
-                        out = m.predict(rec.samples, rec.sampleRate, sa, kernel = kernel!!,
+                        out = m.analyse(rec.samples, rec.sampleRate, sa, kernel = kernel!!,
                             onProgress = { done, total ->
                                 // the identify loop is plain blocking code, so cancellation
                                 // only lands where it is checked -- once per window
@@ -175,13 +178,17 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
                                 Log.i(TAG, "window $done/$total")
                             })
                     }
-                    Log.i(TAG, "identified ${rec.seconds}s in ${ms}ms")
+                    Log.i(TAG, "identified ${rec.seconds}s in ${ms}ms, " +
+                        "sa offset ${out.saOffsetCents?.let { "%.1f".format(it) } ?: "none"}")
                     out to ms
                 }
             }.onSuccess { (out, ms) ->
                 _state.update {
-                    it.copy(step = Step.RESULT, predictions = out, elapsedMillis = ms,
-                        analysedSeconds = rec.seconds)
+                    it.copy(
+                        step = Step.RESULT, predictions = out.predictions, elapsedMillis = ms,
+                        analysedSeconds = rec.seconds,
+                        saDriftCents = out.saOffsetCents.takeIf { c -> SaCheck.isDrift(c) },
+                    )
                 }
             }.onFailure { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -191,6 +198,18 @@ class IdentifierViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    /** Take the tonic the recording actually used, and run the same take again. */
+    fun rerunWithDetectedSa() {
+        val drift = _state.value.saDriftCents ?: return
+        val corrected = SaCheck.correctedTonic(_state.value.saHz, drift)
+        Sa.remember(getApplication(), corrected)
+        _state.update {
+            it.copy(saHz = corrected, keyboardMidi = Sa.nearest(corrected).first,
+                saDriftCents = null)
+        }
+        analyse()
     }
 
     fun cancelAnalysis() {

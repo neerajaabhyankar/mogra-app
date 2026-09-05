@@ -22,6 +22,15 @@ LOCALES = (("en", "values"), ("mr", "values-mr"), ("hi", "values-hi"))
 COL = {"en": 1, "mr": 2, "hi": 3}
 
 ROW = re.compile(r"^\|\s*`([a-z0-9_]+)`\s*\|(.*)\|\s*$")
+
+# Key prefixes that become <string-array> rather than <string>. Each is a numbered run --
+# raag_00.., dbraag_000.., swar_00.. -- and the number is the index the app looks up, so the
+# rows have to be complete and in order.
+ARRAYS = {
+    "raag_names": re.compile(r"^raag_(\d\d)$"),
+    "db_raag_names": re.compile(r"^dbraag_(\d\d\d)$"),
+    "swar_names": re.compile(r"^swar_(\d\d)$"),
+}
 SPEC = re.compile(r"%(\d+\$)?[-#+ 0,(]*\d*(?:\.\d+)?[a-zA-Z]")
 
 HEADER = (
@@ -69,19 +78,24 @@ def check(strings):
 
 def main():
     all_rows = rows()
-    raags = [r for r in all_rows if re.fullmatch(r"raag_\d\d", r[0])]
-    strings = [r for r in all_rows if r not in raags]
 
-    problems = check(strings)
+    arrays = {}
+    for name, pattern in ARRAYS.items():
+        matched = [(int(pattern.match(r[0]).group(1)), r) for r in all_rows if pattern.match(r[0])]
+        matched.sort()
+        if [i for i, _ in matched] != list(range(len(matched))):
+            print(f"{name}: rows are not a complete run from 0", file=sys.stderr)
+            return 1
+        arrays[name] = [r for _, r in matched]
+
+    in_array = {id(r) for group in arrays.values() for r in group}
+    strings = [r for r in all_rows if id(r) not in in_array]
+
+    problems = check(strings) + check([r for g in arrays.values() for r in g])
     if problems:
         print("refusing to generate:", file=sys.stderr)
         for p in problems:
             print("  " + p, file=sys.stderr)
-        return 1
-
-    expected = sorted(f"raag_{i:02d}" for i in range(len(raags)))
-    if [r[0] for r in raags] != expected:
-        print(f"raag rows are not raag_00..raag_{len(raags)-1:02d} in order", file=sys.stderr)
         return 1
 
     res = ROOT / "app/src/main/res"
@@ -91,14 +105,16 @@ def main():
         body = "".join(f'    <string name="{r[0]}">{escape(r[i])}</string>\n' for r in strings)
         (res / folder / "strings.xml").write_text(HEADER + body + "</resources>\n")
 
-        items = "".join(f"        <item>{escape(r[i])}</item>\n" for r in raags)
-        array = (
-            '    <!-- raags.json order, which is the order the model emits. Looked up by\n'
-            '         index, so this must not be re-sorted. -->\n'
-            '    <string-array name="raag_names">\n' + items + "    </string-array>\n"
-        )
-        (res / folder / "arrays.xml").write_text(HEADER + array + "</resources>\n")
-        print(f"{folder}: {len(strings)} strings, {len(raags)} raag names")
+        blocks = []
+        for name, group in arrays.items():
+            items = "".join(f"        <item>{escape(r[i])}</item>\n" for r in group)
+            blocks.append(
+                "    <!-- Index order matters: these are looked up by position, never by\n"
+                "         name, so the list must not be re-sorted. -->\n"
+                f'    <string-array name="{name}">\n' + items + "    </string-array>\n")
+        (res / folder / "arrays.xml").write_text(HEADER + "\n".join(blocks) + "</resources>\n")
+        counts = ", ".join(f"{len(g)} {n}" for n, g in arrays.items())
+        print(f"{folder}: {len(strings)} strings, {counts}")
     return 0
 
 

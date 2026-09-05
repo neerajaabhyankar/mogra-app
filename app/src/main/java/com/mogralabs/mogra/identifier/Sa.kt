@@ -66,6 +66,11 @@ object Sa {
         return if (blackIndex >= 0) context.getString(R.string.peg_black, Numerals.of(context, blackIndex + 1)) else null
     }
 
+    /** The last Sa the user set, or null if they never have. */
+    fun savedOrNull(context: Context): Double? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getFloat(KEY_SA_HZ, 0f).takeIf { it > 0f }?.toDouble()
+
     /** The last Sa the user set, or C♯3 the first time. Kept so the flow never asks twice. */
     fun remembered(context: Context): Double =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

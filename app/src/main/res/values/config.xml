@@ -10,4 +10,5 @@
          break across two lines. -->
     <integer name="wordmark_size_sp">47</integer>
     <integer name="wordmark_tracking_hundredths">-80</integer>
+
 </resources>

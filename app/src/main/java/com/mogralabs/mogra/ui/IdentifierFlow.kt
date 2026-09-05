@@ -10,6 +10,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,7 +37,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +66,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mogralabs.mogra.R
+import com.mogralabs.mogra.audio.SaCheck
 import com.mogralabs.mogra.digits
 import com.mogralabs.mogra.identifier.IdentifierViewModel
 import com.mogralabs.mogra.identifier.IdentifierViewModel.SaTab
@@ -108,29 +112,6 @@ fun IdentifierFlow(onLeave: () -> Unit) {
 }
 
 // ------------------------------------------------------------------ shared furniture
-
-@Composable
-private fun FlowHeader(title: String, step: String?, onBack: () -> Unit) {
-    val back = stringResource(R.string.cd_back)
-    Row(
-        Modifier.fillMaxWidth().height(44.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Box(
-            Modifier.size(44.dp).clickable(onClick = onBack)
-                .semantics { contentDescription = back; role = Role.Button },
-            contentAlignment = Alignment.CenterStart,
-        ) { BackIcon(Mogra.Cream.copy(alpha = 0.70f)) }
-        MicroLabel(title, color = Mogra.TextMuted)
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.CenterEnd) {
-            if (step != null) {
-                Text(step, style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
-                    color = Mogra.Cream.copy(alpha = 0.28f))
-            }
-        }
-    }
-}
 
 /** The one red bar. It only ever means "go on to the next thing", never "record". */
 @Composable
@@ -219,7 +200,7 @@ private fun SetSaScreen(
 
         Spacer(Modifier.height(20.dp))
         when (state.saTab) {
-            SaTab.KEYBOARD -> Keyboard(state.keyboardMidi, vm::selectMidi)
+            SaTab.KEYBOARD -> SaKeyboard(state.keyboardMidi, vm::selectMidi)
             SaTab.HUM -> HumPanel(state, onHum)
             SaTab.HZ -> HzPanel(state, vm::setSaHz)
         }
@@ -267,96 +248,6 @@ private fun Tabs(selected: SaTab, onSelect: (SaTab) -> Unit) {
     }
 }
 
-/**
- * One octave on screen, dragged sideways through A2 to E4. It opens on C3 so a common male
- * Sa is under the thumb without dragging.
- */
-@Composable
-private fun Keyboard(selected: Int, onSelect: (Int) -> Unit) {
-    val scroll = rememberScrollState()
-    val density = LocalDensity.current
-    val whites = remember { (Sa.LOWEST_MIDI..Sa.HIGHEST_MIDI).filter { !Sa.isAccidental(it) } }
-    val blacks = remember { (Sa.LOWEST_MIDI..Sa.HIGHEST_MIDI).filter { Sa.isAccidental(it) } }
-
-    LaunchedEffect(Unit) {
-        val c3 = whites.indexOfFirst { it >= 48 }.coerceAtLeast(0)
-        scroll.scrollTo(with(density) { (c3 * KEY_W).dp.roundToPx() })
-    }
-
-    Box(Modifier.fillMaxWidth().height(124.dp)) {
-        Box(Modifier.horizontalScroll(scroll)) {
-            Row {
-                whites.forEach { midi ->
-                    val on = midi == selected
-                    Box(
-                        Modifier.width((KEY_W - 1).dp).height(124.dp).padding(end = 1.dp)
-                            .clip(RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
-                            .background(if (on) Mogra.Crimson else Color(0xFF211A1C))
-                            .border(1.dp, if (on) Mogra.Crimson else Mogra.Hairline,
-                                RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
-                            .clickable { onSelect(midi) }
-                            .semantics {
-                                contentDescription = Sa.fullNameOf(midi)
-                                role = Role.RadioButton
-                                this.selected = on
-                            },
-                        contentAlignment = Alignment.BottomCenter,
-                    ) {
-                        Text(
-                            if (Sa.nameOf(midi) == "C") Sa.fullNameOf(midi) else Sa.nameOf(midi),
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                            color = if (on) Color(0xFFFFF1F3) else Mogra.Cream.copy(alpha = 0.40f),
-                            modifier = Modifier.padding(bottom = 9.dp),
-                        )
-                    }
-                }
-            }
-            blacks.forEach { midi ->
-                val below = whites.indexOfLast { it < midi }
-                val on = midi == selected
-                Box(
-                    Modifier.offset(x = ((below + 1) * KEY_W - BLACK_W / 2).dp)
-                        .width(BLACK_W.dp).height(78.dp)
-                        .clip(RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
-                        .background(if (on) Mogra.Crimson else Color(0xFF0C090B))
-                        .border(1.dp, if (on) Mogra.Crimson else Mogra.Cream.copy(alpha = 0.14f),
-                            RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
-                        .clickable { onSelect(midi) }
-                        .semantics {
-                            contentDescription = Sa.fullNameOf(midi)
-                            role = Role.RadioButton
-                            this.selected = on
-                        },
-                    contentAlignment = Alignment.BottomCenter,
-                ) {
-                    if (on) {
-                        Text(Sa.nameOf(midi), style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 10.sp, letterSpacing = 0.sp),
-                            color = Color(0xFFFFF1F3), modifier = Modifier.padding(bottom = 8.dp))
-                    }
-                }
-            }
-        }
-        Box(Modifier.fillMaxSize()) {
-            Box(Modifier.width(26.dp).height(124.dp).align(Alignment.CenterStart).background(
-                Brush.horizontalGradient(listOf(Mogra.Ink, Color.Transparent))))
-            Box(Modifier.width(26.dp).height(124.dp).align(Alignment.CenterEnd).background(
-                Brush.horizontalGradient(listOf(Color.Transparent, Mogra.Ink))))
-        }
-    }
-    Spacer(Modifier.height(12.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically) {
-        Text("A2", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
-            color = Mogra.Cream.copy(alpha = 0.34f))
-        Text(stringResource(R.string.sa_keyboard_hint), style = MaterialTheme.typography.bodyMedium,
-            color = Mogra.Cream.copy(alpha = 0.46f))
-        Text("E4", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
-            color = Mogra.Cream.copy(alpha = 0.34f))
-    }
-}
-
 @Composable
 private fun HumPanel(state: IdentifierViewModel.State, onHum: () -> Unit) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -391,9 +282,6 @@ private fun heardLine(hz: Double): String {
     } ?: ""
     return "${hzText(hz)} · $note$offset"
 }
-
-/** Frequencies and the timer are read as instrument numbers, so they stay Latin. */
-private fun hzText(hz: Double) = String.format(Locale.ROOT, "%.2f Hz", hz)
 
 @Composable
 private fun HzPanel(state: IdentifierViewModel.State, onSet: (Double) -> Unit) {
@@ -469,31 +357,12 @@ private fun RecordScreen(
     vm: IdentifierViewModel,
     onRecord: () -> Unit,
 ) = MograScreen {
-    FlowHeader(stringResource(R.string.tool_identifier_title), stringResource(R.string.step_of, digits(2), digits(2)), onBack = vm::changeSa)
-    val changeSa = stringResource(R.string.cd_change_sa)
+    FlowHeader(stringResource(R.string.tool_identifier_title),
+        stringResource(R.string.step_of, digits(2), digits(2)), onBack = vm::changeSa)
 
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(16.dp))
-        Row(
-            Modifier.fillMaxWidth().height(44.dp).clip(Card).background(Mogra.SurfaceTint)
-                .border(1.dp, Mogra.Hairline, Card).padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                MicroLabel(stringResource(R.string.sa_label), color = Mogra.TextFaint)
-                Text(Sa.fullNameOf(Sa.nearest(state.saHz).first),
-                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
-                    color = Mogra.TextPrimary)
-                Text(hzText(state.saHz), style = MaterialTheme.typography.bodyLarge,
-                    color = Mogra.TextMuted)
-            }
-            Text(stringResource(R.string.rec_change_sa), style = MaterialTheme.typography.bodyLarge.copy(
-                fontWeight = FontWeight.SemiBold), color = Mogra.CrimsonSoft,
-                modifier = Modifier.clickable(onClick = vm::changeSa)
-                    .semantics { contentDescription = changeSa; role = Role.Button })
-        }
+        SaBar(state.saHz, onChange = vm::changeSa)
 
         Spacer(Modifier.height(18.dp))
         Text(stringResource(R.string.rec_title), style = MaterialTheme.typography.displayMedium, color = Mogra.TextPrimary)
@@ -570,12 +439,106 @@ private fun AnalysingScreen(state: IdentifierViewModel.State, onBack: () -> Unit
 
 // ------------------------------------------------------------------ 4. result
 
+/**
+ * A quiet flag when the recording's own Sa sits 10-50 cents off the one that was given.
+ *
+ * Collapsed to a single warning triangle, because most runs will not show it and the ones
+ * that do are still showing a usable answer — the model ran with the Sa it was told. Tapping
+ * it opens the sentence and the offer to run the take again on the tonic the recording
+ * actually used.
+ */
+@Composable
+private fun SaDriftWarning(driftCents: Double?, onRerun: () -> Unit) {
+    if (driftCents == null) return
+    var open by remember { mutableStateOf(false) }
+    val spoken = stringResource(R.string.cd_sa_drift)
+    val cents = digits(SaCheck.roundedCents(driftCents))
+    val message = stringResource(
+        if (driftCents > 0) R.string.sa_drift_above else R.string.sa_drift_below, cents)
+
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 14.dp).clip(Card)
+            .background(Mogra.SurfaceTint)
+            .border(1.dp, Mogra.Cream.copy(alpha = 0.14f), Card)
+            .clickable { open = !open }
+            .semantics { contentDescription = if (open) message else spoken; role = Role.Button }
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WarningTriangle()
+            Text(
+                if (open) message else spoken,
+                style = MaterialTheme.typography.bodyLarge,
+                color = Mogra.Cream.copy(alpha = 0.82f),
+                modifier = Modifier.weight(1f),
+            )
+            Disclosure(open)
+        }
+        if (open) {
+            Spacer(Modifier.height(12.dp))
+            PrimaryButton(stringResource(R.string.sa_drift_rerun), onClick = onRerun)
+        }
+    }
+}
+
+/** The little chevron that says this row opens. */
+@Composable
+private fun Disclosure(open: Boolean) {
+    Canvas(Modifier.size(14.dp)) {
+        val w = size.width
+        val h = size.height
+        val stroke = 1.7.dp.toPx()
+        val cap = androidx.compose.ui.graphics.StrokeCap.Round
+        val colour = Mogra.Cream.copy(alpha = 0.55f)
+        // pointing down when closed, up when open
+        val top = if (open) h * 0.66f else h * 0.34f
+        val tip = if (open) h * 0.34f else h * 0.66f
+        drawLine(colour, androidx.compose.ui.geometry.Offset(w * 0.18f, top),
+            androidx.compose.ui.geometry.Offset(w / 2f, tip), strokeWidth = stroke, cap = cap)
+        drawLine(colour, androidx.compose.ui.geometry.Offset(w * 0.82f, top),
+            androidx.compose.ui.geometry.Offset(w / 2f, tip), strokeWidth = stroke, cap = cap)
+    }
+}
+
+@Composable
+private fun WarningTriangle() {
+    Canvas(Modifier.size(20.dp)) {
+        val w = size.width
+        val h = size.height
+        // a rounded triangle, filled, so it carries the same weight as the play button
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w / 2f, h * 0.06f)
+            lineTo(w * 0.98f, h * 0.92f)
+            lineTo(w * 0.02f, h * 0.92f)
+            close()
+        }
+        drawPath(path, Mogra.Crimson)
+        drawLine(
+            androidx.compose.ui.graphics.Color.White,
+            androidx.compose.ui.geometry.Offset(w / 2f, h * 0.38f),
+            androidx.compose.ui.geometry.Offset(w / 2f, h * 0.62f),
+            strokeWidth = 1.8.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        drawCircle(
+            androidx.compose.ui.graphics.Color.White,
+            radius = 1.0.dp.toPx(),
+            center = androidx.compose.ui.geometry.Offset(w / 2f, h * 0.76f),
+        )
+    }
+}
+
 @Composable
 private fun ResultScreen(state: IdentifierViewModel.State, vm: IdentifierViewModel) = MograScreen {
     FlowHeader(stringResource(R.string.result_title), null, onBack = vm::recordAgain)
 
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(16.dp))
+        SaDriftWarning(state.saDriftCents, onRerun = vm::rerunWithDetectedSa)
         MicroLabel(stringResource(R.string.result_most_likely), color = Mogra.TextFaint)
         Spacer(Modifier.height(10.dp))
 
